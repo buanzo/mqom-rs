@@ -1,13 +1,14 @@
 //! Types for the `MQOM2-L1-gf16-short-r5` parameter set.
 //!
-//! Native verification is implemented. Key generation and signing remain
-//! under active development. Internal proof stages are intentionally kept out
-//! of the public API.
+//! Native verification, caller-randomized key generation, and randomized
+//! signing are implemented and interoperable with the v2.1.1 KAT. Internal
+//! proof stages are intentionally kept out of the public API.
 
 use crate::params;
 use core::fmt;
+use rand_core::{CryptoRng, TryCryptoRng};
 use signature::SignatureEncoding;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Canonical profile label from MQOM v2.1.1.
 pub const PARAMETER_SET: &str = "MQOM2-L1-gf16-short-r5";
@@ -46,6 +47,35 @@ impl fmt::Display for EncodingError {
             "invalid encoded length: expected {}, received {}",
             self.expected, self.actual
         )
+    }
+}
+
+impl core::error::Error for EncodingError {}
+
+/// An error encountered while importing a signing key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SigningKeyError {
+    /// The byte encoding has the wrong length.
+    InvalidLength(EncodingError),
+    /// The embedded public key does not match the secret vector.
+    Inconsistent,
+}
+
+impl fmt::Display for SigningKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength(error) => error.fmt(formatter),
+            Self::Inconsistent => formatter.write_str("inconsistent MQOM signing key"),
+        }
+    }
+}
+
+impl core::error::Error for SigningKeyError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::InvalidLength(error) => Some(error),
+            Self::Inconsistent => None,
+        }
     }
 }
 
@@ -203,20 +233,67 @@ impl Drop for SecretKeyBytes {
 pub struct SigningKey([u8; SECRET_KEY_SIZE]);
 
 impl SigningKey {
-    /// Parse an exact-length secret-key encoding.
-    ///
-    /// Internal key consistency validation will be enabled with native key
-    /// generation. Until then, callers should only import trusted test keys.
+    /// Generate a fresh signing key using caller-supplied cryptographic
+    /// randomness.
     ///
     /// # Errors
     ///
-    /// Returns [`EncodingError`] when `bytes` is not exactly
-    /// [`SECRET_KEY_SIZE`] bytes long.
-    pub fn from_slice(bytes: &[u8]) -> Result<Self, EncodingError> {
-        let encoded: [u8; SECRET_KEY_SIZE] = bytes.try_into().map_err(|_| EncodingError {
-            expected: SECRET_KEY_SIZE,
-            actual: bytes.len(),
+    /// Returns an opaque error if the fixed profile cannot be expanded.
+    pub fn generate<R: CryptoRng + ?Sized>(rng: &mut R) -> Result<Self, signature::Error> {
+        let mut seed = Zeroizing::new([0u8; crate::keygen::KEYGEN_SEED_SIZE]);
+        rng.fill_bytes(seed.as_mut());
+        crate::keygen::keypair_from_seed(&seed)
+            .map(|(secret_key, _)| Self(secret_key))
+            .ok_or_else(signature::Error::new)
+    }
+
+    /// Sign `message` using caller-supplied cryptographic randomness.
+    ///
+    /// # Errors
+    ///
+    /// Returns an opaque error if the randomness source fails, the imported
+    /// secret key is inconsistent, or signature construction fails.
+    pub fn try_sign_with_rng<R: TryCryptoRng + ?Sized>(
+        &self,
+        rng: &mut R,
+        message: &[u8],
+    ) -> Result<Signature, signature::Error> {
+        self.try_sign_inner(rng, message)
+    }
+
+    fn try_sign_inner<R: TryCryptoRng + ?Sized>(
+        &self,
+        rng: &mut R,
+        message: &[u8],
+    ) -> Result<Signature, signature::Error> {
+        let mut master_seed = Zeroizing::new([0u8; params::SEED_SIZE]);
+        rng.try_fill_bytes(master_seed.as_mut())
+            .map_err(|_| signature::Error::new())?;
+        let mut salt = Zeroizing::new([0u8; params::SALT_SIZE]);
+        rng.try_fill_bytes(salt.as_mut())
+            .map_err(|_| signature::Error::new())?;
+
+        crate::sign::sign(&self.0, message, &master_seed, &salt)
+            .map(Signature)
+            .ok_or_else(signature::Error::new)
+    }
+
+    /// Parse and validate a canonical secret-key encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SigningKeyError`] when the length is wrong or the embedded
+    /// public key is inconsistent with the secret vector.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, SigningKeyError> {
+        let encoded: [u8; SECRET_KEY_SIZE] = bytes.try_into().map_err(|_| {
+            SigningKeyError::InvalidLength(EncodingError {
+                expected: SECRET_KEY_SIZE,
+                actual: bytes.len(),
+            })
         })?;
+        if !crate::keygen::secret_key_is_consistent(&encoded) {
+            return Err(SigningKeyError::Inconsistent);
+        }
         Ok(Self(encoded))
     }
 
@@ -235,6 +312,24 @@ impl SigningKey {
     }
 }
 
+impl signature::Keypair for SigningKey {
+    type VerifyingKey = VerifyingKey;
+
+    fn verifying_key(&self) -> Self::VerifyingKey {
+        Self::verifying_key(self)
+    }
+}
+
+impl signature::RandomizedSigner<Signature> for SigningKey {
+    fn try_sign_with_rng<R: TryCryptoRng + ?Sized>(
+        &self,
+        rng: &mut R,
+        message: &[u8],
+    ) -> Result<Signature, signature::Error> {
+        self.try_sign_inner(rng, message)
+    }
+}
+
 impl fmt::Debug for SigningKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("SigningKey([REDACTED])")
@@ -250,6 +345,42 @@ impl Drop for SigningKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::convert::Infallible;
+    use rand_core::{TryCryptoRng, TryRng};
+
+    struct TestRng(u8);
+
+    impl TryRng for TestRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            let mut bytes = [0u8; 4];
+            self.try_fill_bytes(&mut bytes)?;
+            Ok(u32::from_le_bytes(bytes))
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            let mut bytes = [0u8; 8];
+            self.try_fill_bytes(&mut bytes)?;
+            Ok(u64::from_le_bytes(bytes))
+        }
+
+        fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
+            for byte in destination {
+                *byte = self.0;
+                self.0 = self.0.wrapping_add(1);
+            }
+            Ok(())
+        }
+    }
+
+    impl TryCryptoRng for TestRng {}
+
+    fn test_signing_key() -> SigningKey {
+        let seed = core::array::from_fn(|index| u8::try_from(index).unwrap());
+        let (encoded, _) = crate::keygen::keypair_from_seed(&seed).unwrap();
+        SigningKey::from_slice(&encoded).unwrap()
+    }
 
     #[test]
     fn sizes_match_v2_1_1() {
@@ -264,12 +395,13 @@ mod tests {
         assert!(VerifyingKey::from_slice(&[0u8; PUBLIC_KEY_SIZE - 1]).is_err());
         assert!(Signature::from_slice(&[0u8; SIGNATURE_SIZE]).is_ok());
         assert!(Signature::from_slice(&[0u8; SIGNATURE_SIZE + 1]).is_err());
-        assert!(SigningKey::from_slice(&[0u8; SECRET_KEY_SIZE]).is_ok());
+        assert!(SigningKey::from_slice(&[0u8; SECRET_KEY_SIZE - 1]).is_err());
+        assert!(SigningKey::from_slice(test_signing_key().to_bytes().as_ref()).is_ok());
     }
 
     #[test]
     fn secret_debug_output_is_redacted() {
-        let key = SigningKey::from_slice(&[0x55; SECRET_KEY_SIZE]).unwrap();
+        let key = test_signing_key();
         assert_eq!(alloc::format!("{key:?}"), "SigningKey([REDACTED])");
         assert_eq!(
             alloc::format!("{:?}", key.to_bytes()),
@@ -279,11 +411,32 @@ mod tests {
 
     #[test]
     fn public_component_is_embedded_at_the_start_of_secret_key() {
-        let mut encoded = [0u8; SECRET_KEY_SIZE];
-        for (index, byte) in encoded[..PUBLIC_KEY_SIZE].iter_mut().enumerate() {
-            *byte = u8::try_from(index).unwrap();
-        }
-        let key = SigningKey::from_slice(&encoded).unwrap();
-        assert_eq!(key.verifying_key().as_ref(), &encoded[..PUBLIC_KEY_SIZE]);
+        let key = test_signing_key();
+        let encoded = key.to_bytes();
+        assert_eq!(
+            key.verifying_key().as_ref(),
+            &encoded.as_ref()[..PUBLIC_KEY_SIZE]
+        );
+    }
+
+    #[test]
+    fn inconsistent_secret_keys_are_rejected() {
+        let key = test_signing_key();
+        let mut encoded = key.to_bytes().0;
+        encoded[PUBLIC_KEY_SIZE] ^= 1;
+        assert_eq!(
+            SigningKey::from_slice(&encoded).unwrap_err(),
+            SigningKeyError::Inconsistent
+        );
+    }
+
+    #[test]
+    fn generated_keys_sign_and_verify() {
+        let mut rng = TestRng(0);
+        let key = SigningKey::generate(&mut rng).unwrap();
+        let signature = key.try_sign_with_rng(&mut rng, b"native MQOM").unwrap();
+        key.verifying_key()
+            .verify(b"native MQOM", &signature)
+            .unwrap();
     }
 }
