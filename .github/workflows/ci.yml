@@ -22,7 +22,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install stable Rust
         run: |
           rustup toolchain install stable --profile minimal
@@ -34,7 +34,7 @@ jobs:
     name: Formatting, lints, and docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install stable Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -47,7 +47,7 @@ jobs:
     name: MSRV 1.85
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: rustup toolchain install 1.85.0 --profile minimal
       - run: cargo +1.85.0 check --workspace --locked
 
@@ -55,7 +55,7 @@ jobs:
     name: no_std targets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install targets
         run: |
           rustup toolchain install stable --profile minimal
@@ -68,7 +68,7 @@ jobs:
     name: Repository policy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Reject oversized files
         shell: bash
         run: |
@@ -88,9 +88,9 @@ jobs:
     name: Pinned upstream oracle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Check out MQOM v2.1.1 separately
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: mqom/mqom-v2
           ref: 01af24ad01203ad08e84f71f59cfa47cbb574050
@@ -98,4 +98,3 @@ jobs:
           persist-credentials: false
       - name: Build and validate 100 oracle cases
         run: cargo xtask oracle --source "$GITHUB_WORKSPACE/.oracle/mqom-v2"
-
