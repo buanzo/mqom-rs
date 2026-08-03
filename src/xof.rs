@@ -10,12 +10,28 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
-pub(crate) fn shake128(parts: &[&[u8]], output: &mut [u8]) {
-    let mut state = Shake128::default();
-    for part in parts {
-        state.update(part);
+pub(crate) struct Shake128State(Shake128);
+
+impl Shake128State {
+    pub(crate) fn new() -> Self {
+        Self(Shake128::default())
     }
-    state.finalize_xof().read(output);
+
+    pub(crate) fn absorb(&mut self, input: &[u8]) {
+        self.0.update(input);
+    }
+
+    pub(crate) fn squeeze(self, output: &mut [u8]) {
+        self.0.finalize_xof().read(output);
+    }
+}
+
+pub(crate) fn shake128(parts: &[&[u8]], output: &mut [u8]) {
+    let mut state = Shake128State::new();
+    for part in parts {
+        state.absorb(part);
+    }
+    state.squeeze(output);
 }
 
 #[cfg(test)]

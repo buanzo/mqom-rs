@@ -6,6 +6,7 @@ rust-version = "1.85"
 publish = false
 
 [dependencies]
+mqom = { path = ".." }
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -13,4 +14,3 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = "warn"
 pedantic = "warn"
-

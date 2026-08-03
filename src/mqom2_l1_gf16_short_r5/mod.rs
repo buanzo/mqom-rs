@@ -1,9 +1,8 @@
 //! Types for the `MQOM2-L1-gf16-short-r5` parameter set.
 //!
-//! Native key generation, signing, and verification are under active
-//! implementation. The encoding types are intentionally available first so
-//! that the conformance harness can exercise strict parsing without exposing
-//! internal proof stages as public API.
+//! Native verification is implemented. Key generation and signing remain
+//! under active development. Internal proof stages are intentionally kept out
+//! of the public API.
 
 use crate::params;
 use core::fmt;
@@ -74,6 +73,16 @@ impl VerifyingKey {
     pub fn to_bytes(&self) -> [u8; PUBLIC_KEY_SIZE] {
         self.0
     }
+
+    /// Verify an MQOM signature over `message`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an opaque signature error if any transcript, opening, or proof
+    /// check fails.
+    pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), signature::Error> {
+        <Self as signature::Verifier<Signature>>::verify(self, message, signature)
+    }
 }
 
 impl AsRef<[u8]> for VerifyingKey {
@@ -88,6 +97,14 @@ impl fmt::Debug for VerifyingKey {
             .debug_tuple("VerifyingKey")
             .field(&self.0.as_slice())
             .finish()
+    }
+}
+
+impl signature::Verifier<Signature> for VerifyingKey {
+    fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), signature::Error> {
+        crate::verify::verify(&self.0, message, &signature.0)
+            .then_some(())
+            .ok_or_else(signature::Error::new)
     }
 }
 
