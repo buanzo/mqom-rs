@@ -1,0 +1,18 @@
+name: Research note
+description: Share analysis, interoperability evidence, or a design concern
+title: "research: "
+labels: [research]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source or specification section
+    validations:
+      required: true
+  - type: textarea
+    id: note
+    attributes:
+      label: Analysis and evidence
+    validations:
+      required: true
+

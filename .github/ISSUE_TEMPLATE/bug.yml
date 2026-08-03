@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible correctness or interoperability problem
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report vulnerabilities here; use private vulnerability reporting.
+  - type: input
+    id: revision
+    attributes:
+      label: Revision
+      description: Exact mqom-rs commit or release.
+    validations:
+      required: true
+  - type: input
+    id: parameter_set
+    attributes:
+      label: Parameter set
+      value: MQOM2-L1-gf16-short-r5
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected result
+    validations:
+      required: true
+

@@ -1,0 +1,11 @@
+mqom-rs contributors
+====================
+
+Arturo Busleiman aka Buanzo
+  Project founder; research direction; design authority; repository,
+  governance, and release stewardship; implementation review.
+
+OpenAI Codex
+  Repository setup; Rust implementation, test, automation, and documentation
+  assistance under Buanzo's direction.
+

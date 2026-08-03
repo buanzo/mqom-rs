@@ -1,0 +1,30 @@
+[package]
+name = "mqom"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Experimental native Rust implementation of the MQOM post-quantum signature scheme"
+repository = "https://github.com/buanzo/mqom-rs"
+license = "AGPL-3.0-only"
+keywords = ["cryptography", "post-quantum", "signature", "mqom"]
+categories = ["cryptography", "no-std"]
+publish = false
+
+[workspace]
+members = ["xtask"]
+resolver = "3"
+
+[dependencies]
+aes = { version = "0.9.2", default-features = false }
+rand_core = { version = "0.10.1", default-features = false }
+sha3 = { version = "0.10.8", default-features = false }
+signature = { version = "3.0.0", default-features = false, features = ["rand_core"] }
+subtle = { version = "2.6.1", default-features = false }
+zeroize = { version = "1.9.0", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

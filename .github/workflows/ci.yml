@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  rust:
+    name: Rust ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Test workspace
+        run: cargo test --workspace --locked
+
+  quality:
+    name: Formatting, lints, and docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo doc --workspace --no-deps --locked
+
+  msrv:
+    name: MSRV 1.85
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: rustup toolchain install 1.85.0 --profile minimal
+      - run: cargo +1.85.0 check --workspace --locked
+
+  no-std:
+    name: no_std targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown thumbv7em-none-eabihf
+      - run: cargo check --lib --locked --target wasm32-unknown-unknown
+      - run: cargo check --lib --locked --target thumbv7em-none-eabihf
+
+  repository-policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Reject oversized files
+        shell: bash
+        run: |
+          oversized="$(find . -path ./.git -prune -o -path ./target -prune -o -type f -size +5M -print -quit)"
+          test -z "$oversized" || { echo "file exceeds 5 MiB: $oversized"; exit 1; }
+      - name: Reject vendored oracle artifacts
+        shell: bash
+        run: |
+          test -z "$(find . -path ./.git -prune -o \( -name '*.req' -o -name '*.rsp' -o -name '*.c' -o -name '*.h' \) -print -quit)"
+      - name: Check package contents
+        shell: bash
+        run: |
+          cargo package --list --allow-dirty > package-files.txt
+          ! grep -E '\.(c|h|req|rsp)$' package-files.txt
+
+  oracle:
+    name: Pinned upstream oracle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Check out MQOM v2.1.1 separately
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: mqom/mqom-v2
+          ref: 01af24ad01203ad08e84f71f59cfa47cbb574050
+          path: .oracle/mqom-v2
+          persist-credentials: false
+      - name: Build and validate 100 oracle cases
+        run: cargo xtask oracle --source "$GITHUB_WORKSPACE/.oracle/mqom-v2"
+
