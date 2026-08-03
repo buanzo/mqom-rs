@@ -6,7 +6,9 @@ rust-version = "1.85"
 publish = false
 
 [dependencies]
+aes = { version = "0.9.2", default-features = false }
 mqom = { path = ".." }
+rand_core = { version = "0.10.1", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

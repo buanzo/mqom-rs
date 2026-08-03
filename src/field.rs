@@ -7,6 +7,7 @@
 
 use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use subtle::{Choice, ConstantTimeEq};
+use zeroize::Zeroize;
 
 /// An element of GF(16), represented in the polynomial basis modulo
 /// `x^4 + x + 1`.
@@ -55,6 +56,12 @@ impl Gf16 {
 impl ConstantTimeEq for Gf16 {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0.ct_eq(&other.0)
+    }
+}
+
+impl Zeroize for Gf16 {
+    fn zeroize(&mut self) {
+        self.0 = 0;
     }
 }
 
@@ -166,6 +173,12 @@ impl Gf256 {
 impl ConstantTimeEq for Gf256 {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0.ct_eq(&other.0)
+    }
+}
+
+impl Zeroize for Gf256 {
+    fn zeroize(&mut self) {
+        self.0 = 0;
     }
 }
 
@@ -287,6 +300,13 @@ impl Gf256x2 {
 impl ConstantTimeEq for Gf256x2 {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.c0.ct_eq(&other.c0) & self.c1.ct_eq(&other.c1)
+    }
+}
+
+impl Zeroize for Gf256x2 {
+    fn zeroize(&mut self) {
+        self.c0.zeroize();
+        self.c1.zeroize();
     }
 }
 

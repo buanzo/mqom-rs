@@ -1,10 +1,19 @@
 use std::{
-    env, fs,
+    convert::Infallible,
+    env,
+    fmt::Write as _,
+    fs,
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
 
+use aes::{
+    Aes256,
+    cipher::{Array, BlockCipherEncrypt, KeyInit},
+};
+use mqom::mqom2_l1_gf16_short_r5::SigningKey;
 use mqom::mqom2_l1_gf16_short_r5::{Signature, VerifyingKey};
+use rand_core::{TryCryptoRng, TryRng};
 
 const ORACLE_COMMIT: &str = "01af24ad01203ad08e84f71f59cfa47cbb574050";
 const PROFILE_CFLAGS: &str = "-DMQOM2_PARAM_SECURITY=128 -DMQOM2_PARAM_BASE_FIELD=4 -DMQOM2_PARAM_TRADEOFF=1 -DMQOM2_PARAM_NBROUNDS=5";
@@ -133,33 +142,49 @@ fn prepare_oracle(source: &Path) -> Result<(), String> {
             response.display()
         ));
     }
-    let verified_count = verify_response(&contents)?;
+    let (verified_count, rust_response) = verify_response(&contents)?;
+    let rust_output = destination.join("rust-generated");
+    fs::create_dir_all(&rust_output)
+        .map_err(|error| format!("cannot create {}: {error}", rust_output.display()))?;
+    let rust_response_path = rust_output.join("PQCsignKAT_88.rsp");
+    fs::write(&rust_response_path, rust_response)
+        .map_err(|error| format!("cannot write {}: {error}", rust_response_path.display()))?;
+    run_command(Command::new(destination.join("kat_check")).current_dir(&rust_output))?;
 
     println!("verified oracle commit: {ORACLE_COMMIT}");
     println!("generated 100 KAT cases: {}", response.display());
-    println!("verified {verified_count} KAT signatures in native Rust");
+    println!(
+        "reproduced {verified_count} KAT keypairs and signatures byte-for-byte in native Rust"
+    );
+    println!(
+        "upstream kat_check accepted Rust output: {}",
+        rust_response_path.display()
+    );
     Ok(())
 }
 
 #[derive(Default)]
 struct KatCase<'a> {
     count: Option<usize>,
+    seed: Option<&'a str>,
     message_len: Option<usize>,
     message: Option<&'a str>,
     public_key: Option<&'a str>,
+    secret_key: Option<&'a str>,
     signed_message_len: Option<usize>,
     signed_message: Option<&'a str>,
 }
 
-fn verify_response(contents: &str) -> Result<usize, String> {
+fn verify_response(contents: &str) -> Result<(usize, String), String> {
     let mut current = KatCase::default();
     let mut verified = 0;
+    let mut rust_response = "# MQOM2-L1-gf16-short-r5\n\n".to_owned();
 
     for line in contents.lines().chain([""]) {
         let line = line.trim();
         if line.is_empty() {
             if current.count.is_some() {
-                verify_case(&current, verified == 0)?;
+                verify_case(&current, verified == 0, &mut rust_response)?;
                 verified += 1;
                 current = KatCase::default();
             }
@@ -174,9 +199,11 @@ fn verify_response(contents: &str) -> Result<usize, String> {
         };
         match name {
             "count" => current.count = Some(parse_decimal(name, value)?),
+            "seed" => current.seed = Some(value),
             "mlen" => current.message_len = Some(parse_decimal(name, value)?),
             "msg" => current.message = Some(value),
             "pk" => current.public_key = Some(value),
+            "sk" => current.secret_key = Some(value),
             "smlen" => current.signed_message_len = Some(parse_decimal(name, value)?),
             "sm" => current.signed_message = Some(value),
             _ => {}
@@ -188,7 +215,7 @@ fn verify_response(contents: &str) -> Result<usize, String> {
             "native verifier expected 100 cases, found {verified}"
         ));
     }
-    Ok(verified)
+    Ok((verified, rust_response))
 }
 
 fn parse_decimal(name: &str, value: &str) -> Result<usize, String> {
@@ -197,7 +224,11 @@ fn parse_decimal(name: &str, value: &str) -> Result<usize, String> {
         .map_err(|error| format!("invalid {name} value {value}: {error}"))
 }
 
-fn verify_case(case: &KatCase<'_>, test_mutations: bool) -> Result<(), String> {
+fn verify_case(
+    case: &KatCase<'_>,
+    test_mutations: bool,
+    rust_response: &mut String,
+) -> Result<(), String> {
     let count = case
         .count
         .ok_or_else(|| "KAT case has no count".to_owned())?;
@@ -208,9 +239,17 @@ fn verify_case(case: &KatCase<'_>, test_mutations: bool) -> Result<(), String> {
         case.message
             .ok_or_else(|| format!("KAT case {count} has no msg"))?,
     )?;
+    let seed = decode_fixed_hex::<48>(
+        case.seed
+            .ok_or_else(|| format!("KAT case {count} has no seed"))?,
+    )?;
     let public_key_bytes = decode_hex(
         case.public_key
             .ok_or_else(|| format!("KAT case {count} has no pk"))?,
+    )?;
+    let secret_key_bytes = decode_hex(
+        case.secret_key
+            .ok_or_else(|| format!("KAT case {count} has no sk"))?,
     )?;
     let signed_message_len = case
         .signed_message_len
@@ -231,6 +270,46 @@ fn verify_case(case: &KatCase<'_>, test_mutations: bool) -> Result<(), String> {
         .ok_or_else(|| format!("KAT case {count} has no detached signature"))?;
     let public_key = VerifyingKey::from_slice(&public_key_bytes)
         .map_err(|error| format!("KAT case {count} public key: {error}"))?;
+    let mut kat_rng = KatDrbg::new(&seed);
+    let generated_key = SigningKey::generate(&mut kat_rng)
+        .map_err(|_| format!("native key generation failed for KAT case {count}"))?;
+    if generated_key.verifying_key().as_ref() != public_key_bytes
+        || generated_key.to_bytes().as_ref() != secret_key_bytes
+    {
+        return Err(format!(
+            "native key generation differs from KAT case {count}"
+        ));
+    }
+    let generated_signature = generated_key
+        .try_sign_with_rng(&mut kat_rng, &message)
+        .map_err(|_| format!("native signing failed for KAT case {count}"))?;
+    if generated_signature.as_ref() != signature_bytes {
+        let first_difference = generated_signature
+            .as_ref()
+            .iter()
+            .zip(signature_bytes)
+            .position(|(generated, expected)| generated != expected);
+        return Err(format!(
+            "native signature differs from KAT case {count} at byte {first_difference:?}"
+        ));
+    }
+    writeln!(rust_response, "count = {count}").map_err(|error| error.to_string())?;
+    append_hex_line(rust_response, "seed", &seed);
+    writeln!(rust_response, "mlen = {}", message.len()).map_err(|error| error.to_string())?;
+    append_hex_line(rust_response, "msg", &message);
+    append_hex_line(rust_response, "pk", generated_key.verifying_key().as_ref());
+    let generated_secret_key = generated_key.to_bytes();
+    append_hex_line(rust_response, "sk", generated_secret_key.as_ref());
+    writeln!(
+        rust_response,
+        "smlen = {}",
+        message.len() + generated_signature.as_ref().len()
+    )
+    .map_err(|error| error.to_string())?;
+    rust_response.push_str("sm = ");
+    append_hex(rust_response, &message);
+    append_hex(rust_response, generated_signature.as_ref());
+    rust_response.push_str("\n\n");
     let signature = Signature::from_slice(signature_bytes)
         .map_err(|error| format!("KAT case {count} signature: {error}"))?;
     public_key
@@ -242,6 +321,99 @@ fn verify_case(case: &KatCase<'_>, test_mutations: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+fn append_hex_line(output: &mut String, name: &str, bytes: &[u8]) {
+    output.push_str(name);
+    output.push_str(" = ");
+    append_hex(output, bytes);
+    output.push('\n');
+}
+
+fn append_hex(output: &mut String, bytes: &[u8]) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+}
+
+struct KatDrbg {
+    key: [u8; 32],
+    value: [u8; 16],
+}
+
+impl KatDrbg {
+    fn new(seed: &[u8; 48]) -> Self {
+        let mut state = Self {
+            key: [0u8; 32],
+            value: [0u8; 16],
+        };
+        state.update(Some(seed));
+        state
+    }
+
+    fn increment_value(&mut self) {
+        for byte in self.value.iter_mut().rev() {
+            let (incremented, overflow) = byte.overflowing_add(1);
+            *byte = incremented;
+            if !overflow {
+                break;
+            }
+        }
+    }
+
+    fn update(&mut self, provided: Option<&[u8; 48]>) {
+        let cipher = Aes256::new(&Array::from(self.key));
+        let mut temporary = [0u8; 48];
+        for block in temporary.chunks_exact_mut(16) {
+            self.increment_value();
+            let mut encrypted = Array::from(self.value);
+            cipher.encrypt_block(&mut encrypted);
+            block.copy_from_slice(&encrypted);
+        }
+        if let Some(provided) = provided {
+            for (byte, provided) in temporary.iter_mut().zip(provided) {
+                *byte ^= provided;
+            }
+        }
+        self.key.copy_from_slice(&temporary[..32]);
+        self.value.copy_from_slice(&temporary[32..]);
+    }
+
+    fn generate(&mut self, output: &mut [u8]) {
+        let cipher = Aes256::new(&Array::from(self.key));
+        for block in output.chunks_mut(16) {
+            self.increment_value();
+            let mut encrypted = Array::from(self.value);
+            cipher.encrypt_block(&mut encrypted);
+            block.copy_from_slice(&encrypted[..block.len()]);
+        }
+        self.update(None);
+    }
+}
+
+impl TryRng for KatDrbg {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0u8; 4];
+        self.generate(&mut bytes);
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0u8; 8];
+        self.generate(&mut bytes);
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
+        self.generate(destination);
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for KatDrbg {}
 
 fn reject_targeted_mutations(
     count: usize,
@@ -303,6 +475,12 @@ fn decode_hex(encoded: &str) -> Result<Vec<u8>, String> {
             Ok((high << 4) | low)
         })
         .collect()
+}
+
+fn decode_fixed_hex<const N: usize>(encoded: &str) -> Result<[u8; N], String> {
+    decode_hex(encoded)?
+        .try_into()
+        .map_err(|value: Vec<u8>| format!("expected {N} decoded bytes, found {}", value.len()))
 }
 
 fn decode_nibble(byte: u8) -> Result<u8, String> {

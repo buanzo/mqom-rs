@@ -12,9 +12,11 @@ extern crate alloc;
 
 mod blc;
 mod field;
+mod keygen;
 mod mq;
 mod params;
 mod prg;
+mod sign;
 mod verify;
 mod xof;
 
