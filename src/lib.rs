@@ -11,7 +11,9 @@
 extern crate alloc;
 
 mod field;
+mod mq;
 mod params;
+mod prg;
 mod xof;
 
 pub mod mqom2_l1_gf16_short_r5;

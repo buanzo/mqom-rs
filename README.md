@@ -7,8 +7,9 @@ The first target is `MQOM2-L1-gf16-short-r5` from upstream release
 [`v2.1.1`](https://github.com/mqom/mqom-v2/tree/v2.1.1). Work currently covers
 the public encodings, parameter checks, GF(16), SHAKE128 transcript foundation,
 GF(256^2) extension-field arithmetic, and a pinned upstream conformance-oracle
-workflow. Native MQ expansion and verification are the next interoperability
-milestones; key generation and signing follow them.
+workflow. Native MQ equation expansion is implemented; transcript
+reconstruction and verification are the next interoperability milestones. Key
+generation and signing follow them.
 
 > [!WARNING]
 > This is research software. It is incomplete, has not been independently
