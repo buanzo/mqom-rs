@@ -9,9 +9,10 @@ use aes::{
     Aes128,
     cipher::{Array, BlockCipherEncrypt, KeyInit},
 };
+use alloc::vec::Vec;
 use zeroize::{Zeroize, Zeroizing};
 
-const BLOCK_SIZE: usize = 16;
+pub(crate) const BLOCK_SIZE: usize = 16;
 const PRG_SELECTOR: u8 = 3;
 
 fn linear_orthomorphism(seed: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
@@ -28,13 +29,81 @@ fn linear_orthomorphism(seed: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
     image
 }
 
-fn tweak_salt(salt: &[u8; BLOCK_SIZE], execution: u8, block_index: u16) -> [u8; BLOCK_SIZE] {
+pub(crate) fn tweak_salt(
+    salt: &[u8; BLOCK_SIZE],
+    selector: u8,
+    execution: u8,
+    index: u16,
+) -> [u8; BLOCK_SIZE] {
     let mut tweaked = *salt;
-    let block_bytes = block_index.to_le_bytes();
-    tweaked[0] ^= PRG_SELECTOR.wrapping_add(execution.wrapping_mul(4));
-    tweaked[1] ^= block_bytes[0];
-    tweaked[2] ^= block_bytes[1];
+    let index_bytes = index.to_le_bytes();
+    tweaked[0] ^= selector.wrapping_add(execution.wrapping_mul(4));
+    tweaked[1] ^= index_bytes[0];
+    tweaked[2] ^= index_bytes[1];
     tweaked
+}
+
+pub(crate) struct SeedDeriver(Aes128);
+
+impl SeedDeriver {
+    pub(crate) fn new(key: &[u8; BLOCK_SIZE]) -> Self {
+        Self(Aes128::new(&Array::from(*key)))
+    }
+
+    pub(crate) fn derive(&self, seed: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
+        let linear_image = Zeroizing::new(linear_orthomorphism(seed));
+        let mut block = Array::from(*seed);
+        self.0.encrypt_block(&mut block);
+        for (byte, mask) in block.iter_mut().zip(linear_image.iter()) {
+            *byte ^= mask;
+        }
+
+        let mut output = [0u8; BLOCK_SIZE];
+        output.copy_from_slice(&block);
+        block.as_mut_slice().zeroize();
+        output
+    }
+}
+
+pub(crate) struct Generator {
+    blocks: Vec<SeedDeriver>,
+}
+
+impl Generator {
+    pub(crate) fn new(salt: &[u8; BLOCK_SIZE], execution: u8, output_len: usize) -> Option<Self> {
+        let block_count = output_len.checked_add(BLOCK_SIZE - 1)? / BLOCK_SIZE;
+        if block_count > usize::from(u16::MAX) + 1 {
+            return None;
+        }
+
+        let mut blocks = Vec::with_capacity(block_count);
+        for block_index in 0..block_count {
+            let block_index = u16::try_from(block_index).ok()?;
+            let key = Zeroizing::new(tweak_salt(salt, PRG_SELECTOR, execution, block_index));
+            blocks.push(SeedDeriver::new(&key));
+        }
+        Some(Self { blocks })
+    }
+
+    pub(crate) fn fill(&self, seed: &[u8; BLOCK_SIZE], output: &mut [u8]) -> bool {
+        let Some(required_blocks) = output
+            .len()
+            .checked_add(BLOCK_SIZE - 1)
+            .map(|length| length / BLOCK_SIZE)
+        else {
+            return false;
+        };
+        if required_blocks > self.blocks.len() {
+            return false;
+        }
+
+        for (deriver, output_block) in self.blocks.iter().zip(output.chunks_mut(BLOCK_SIZE)) {
+            let mut block = deriver.derive(seed);
+            output_block.copy_from_slice(&block[..output_block.len()]);
+            block.zeroize();
+        }
+        true
+    }
 }
 
 /// Fill `output` with the MQOM PRG stream.
@@ -47,35 +116,10 @@ pub(crate) fn fill(
     seed: &[u8; BLOCK_SIZE],
     output: &mut [u8],
 ) -> bool {
-    let Some(block_count) = output
-        .len()
-        .checked_add(BLOCK_SIZE - 1)
-        .map(|n| n / BLOCK_SIZE)
-    else {
+    let Some(generator) = Generator::new(salt, execution, output.len()) else {
         return false;
     };
-    if block_count > usize::from(u16::MAX) + 1 {
-        return false;
-    }
-
-    let linear_image = Zeroizing::new(linear_orthomorphism(seed));
-    for (block_index, output_block) in output.chunks_mut(BLOCK_SIZE).enumerate() {
-        let Ok(block_index) = u16::try_from(block_index) else {
-            return false;
-        };
-        let key = Zeroizing::new(tweak_salt(salt, execution, block_index));
-        let cipher = Aes128::new(&Array::from(*key));
-        let mut block = Array::from(*seed);
-        cipher.encrypt_block(&mut block);
-
-        for (byte, mask) in block.iter_mut().zip(linear_image.iter()) {
-            *byte ^= mask;
-        }
-        output_block.copy_from_slice(&block[..output_block.len()]);
-        block.as_mut_slice().zeroize();
-    }
-
-    true
+    generator.fill(seed, output)
 }
 
 #[cfg(test)]
@@ -100,7 +144,7 @@ mod tests {
     #[test]
     fn tweak_is_little_endian_and_domain_separated() {
         let salt = [0x55; BLOCK_SIZE];
-        let tweaked = tweak_salt(&salt, 2, 0x1234);
+        let tweaked = tweak_salt(&salt, PRG_SELECTOR, 2, 0x1234);
         assert_eq!(tweaked[0], 0x55 ^ 0x0b);
         assert_eq!(tweaked[1], 0x55 ^ 0x34);
         assert_eq!(tweaked[2], 0x55 ^ 0x12);

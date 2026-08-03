@@ -11,6 +11,8 @@ pub(crate) const EXT_FIELD_BITS: usize = 16;
 pub(crate) const MU: usize = EXT_FIELD_BITS / BASE_FIELD_BITS;
 pub(crate) const TAU: usize = 12;
 pub(crate) const NB_EVALS_LOG: usize = 11;
+pub(crate) const NB_EVALS: usize = 1 << NB_EVALS_LOG;
+pub(crate) const GRINDING_BITS: usize = 8;
 pub(crate) const ETA: usize = SECURITY_BITS / EXT_FIELD_BITS;
 
 pub(crate) const PUBLIC_KEY_SIZE: usize = 2 * SEED_SIZE + (MQ_M / MU) * EXT_FIELD_BITS / 8;
