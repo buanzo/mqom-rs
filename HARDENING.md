@@ -59,6 +59,53 @@ The signing path expands one GGM tree at a time and clears it before processing
 the next execution. This bounds live tree storage instead of retaining all
 twelve trees simultaneously.
 
+## Free scanner and dynamic-analysis pass
+
+On 2026-08-03, the repository was reviewed with locally runnable, free tools.
+These results are point-in-time engineering evidence, not an independent audit:
+
+- `gitleaks` 8.30.1 scanned all eight Git commits and reported no secrets.
+- OSV-Scanner 2.4.0 with Rust call analysis and Trivy 0.73.0 reported no known
+  vulnerabilities in either lockfile. Trivy also reported no secrets; its
+  configuration scan found no supported configuration files, so that result
+  does not cover GitHub Actions policy.
+- Fresh `cargo audit` and `cargo deny` runs passed for the main and fuzz
+  lockfiles. `cargo deny` noted expected duplicate `cpufeatures` and
+  `crypto-common` versions across the AES and SHA-3 dependency stacks.
+- Semgrep CE 1.172.0 scanned the tracked Rust sources with its Rust ruleset. Its
+  sole informational result concerned `args_os` in the operator-only oracle
+  command dispatcher. That dispatcher uses arguments only to select an exact
+  command and validate a pinned, clean, absolute checkout; it does not make an
+  authentication or authorization decision from raw argument bytes.
+- `cargo geiger` confirmed that this crate contains no unsafe code. Some
+  transitive cryptographic and platform dependencies contain unsafe code, and
+  eleven dependency files were not scanned, so this is not a complete unsafe
+  dependency review. `cargo machete` found no unused dependencies.
+- The 34 library tests passed in release mode, with AddressSanitizer, and with
+  randomized Rust layouts. AddressSanitizer coverage used nightly Rust's
+  `-Zsanitizer=address` support on `x86_64-unknown-linux-gnu`.
+- Two 60-second libFuzzer campaigns completed without a crash: `public_api`
+  executed 10,202 inputs and `verify` executed 29,313 inputs, including
+  valid-length verifier inputs. This is a smoke campaign, not saturation.
+- LLVM source coverage was 72.37% by line across the workspace. Core protocol
+  modules ranged from 89.00% to 100.00% except for public API trait and glue
+  code at 70.31%; the separate `xtask` command was not exercised by that run.
+- Miri completed 12 bounded tests covering opening rejection, field
+  arithmetic and encodings, MQ dimension rejection, and extension-matrix
+  multiplication without a diagnostic. A full Miri run was not completed:
+  exhaustive field tests enumerate up to 65,535 values, while vector and API
+  fixtures perform substantial AES/SHAKE-backed key expansion under the
+  interpreter. All 34 tests, including those cases, passed under the normal,
+  release, AddressSanitizer, and randomized-layout runs.
+
+GitHub CodeQL default setup now analyzes Rust and GitHub Actions with the
+extended query suite. Six hard-coded-cryptographic-value alerts were reviewed:
+two were the public all-zero salts required by the pinned upstream protocol,
+and four were test vectors or malformed-input fixtures. The runtime salt uses
+were checked against the upstream C oracle and all six alerts were dismissed
+with those reasons recorded in GitHub. No CodeQL alerts remain open from that
+run.
+
 ## Portability, dependencies, and packaging
 
 - CI tests Linux, macOS, and Windows and checks Rust 1.85 as the MSRV.
