@@ -70,9 +70,11 @@ fn round_trip<R: TryCryptoRng + ?Sized>(rng: &mut R, message: &[u8]) {
 
 See [ROADMAP.md](ROADMAP.md) for public milestones and
 [HARDENING.md](HARDENING.md) for the current security-engineering evidence and
-its limits. Issues, research notes, test reports, and design discussion are
-welcome. During the initial steward-only implementation phase, outside code is
-reviewed but not merged; see [CONTRIBUTING.md](CONTRIBUTING.md).
+its limits. The review boundaries and attacker stories are in
+[THREAT_MODEL.md](THREAT_MODEL.md). Issues, research notes, test reports, and
+design discussion are welcome. During the initial steward-only implementation
+phase, outside code is reviewed but not merged; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

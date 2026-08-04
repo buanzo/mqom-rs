@@ -5,7 +5,8 @@ approved for sensitive or production use, and no independent security audit is
 claimed.
 
 The current security-engineering checks and their limits are recorded in
-[HARDENING.md](HARDENING.md).
+[HARDENING.md](HARDENING.md). Review scope, trust boundaries, and severity
+assumptions are documented in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 Please report suspected vulnerabilities through GitHub private vulnerability
 reporting for this repository. Include the affected commit, parameter set,
