@@ -299,8 +299,8 @@ pub(crate) fn commit(
         let mut folding = Zeroizing::new([[0u8; EXPANDED_LEAF_SIZE]; params::NB_EVALS_LOG]);
 
         for (leaf_index, leaf_seed) in leaves.iter().enumerate() {
-            let commitment = committer.commit(leaf_seed);
-            commitment_hash.absorb(&commitment);
+            let commitment = Zeroizing::new(committer.commit(leaf_seed));
+            commitment_hash.absorb(commitment.as_ref());
 
             let mut expanded = Zeroizing::new([0u8; EXPANDED_LEAF_SIZE]);
             expanded[..SEED_SIZE].copy_from_slice(leaf_seed);
@@ -315,9 +315,12 @@ pub(crate) fn commit(
 
         for (folding_index, folded) in folding.iter().enumerate() {
             let basis = Gf256x2::from_bytes((1u16 << folding_index).to_le_bytes());
-            let mut base_vector = [Gf16::ZERO; params::MQ_N];
-            unpack_gf16(&folded[..BASE_VECTOR_SIZE], &mut base_vector).then_some(())?;
-            for (evaluation, base_element) in x_zero[execution].iter_mut().zip(base_vector) {
+            let mut base_vector = Zeroizing::new([Gf16::ZERO; params::MQ_N]);
+            unpack_gf16(&folded[..BASE_VECTOR_SIZE], base_vector.as_mut()).then_some(())?;
+            for (evaluation, base_element) in x_zero[execution]
+                .iter_mut()
+                .zip(base_vector.iter().copied())
+            {
                 *evaluation += base_element * basis;
             }
 

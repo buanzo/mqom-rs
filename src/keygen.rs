@@ -24,8 +24,8 @@ pub(crate) fn keypair_from_seed(
     let mut expansion = Zeroizing::new([0u8; EXPANSION_SIZE]);
     shake128(&[&[0x00], seed], expansion.as_mut());
 
-    let mut secret_vector = [Gf16::ZERO; params::MQ_N];
-    unpack_gf16(&expansion[..SECRET_VECTOR_SIZE], &mut secret_vector).then_some(())?;
+    let mut secret_vector = Zeroizing::new([Gf16::ZERO; params::MQ_N]);
+    unpack_gf16(&expansion[..SECRET_VECTOR_SIZE], secret_vector.as_mut()).then_some(())?;
     let master_seed: &[u8; KEYGEN_SEED_SIZE] = expansion[SECRET_VECTOR_SIZE..].try_into().ok()?;
 
     let mut public_key = [0u8; params::PUBLIC_KEY_SIZE];

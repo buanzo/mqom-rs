@@ -1,0 +1,30 @@
+[package]
+name = "mqom-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mqom = { version = "=0.0.0", path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "public_api"
+path = "fuzz_targets/public_api.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify"
+path = "fuzz_targets/verify.rs"
+test = false
+doc = false
+bench = false

@@ -1,5 +1,6 @@
 /target/
+/fuzz/artifacts/
+/fuzz/target/
 /.oracle/
 *.req
 *.rsp
-
