@@ -64,6 +64,14 @@ jobs:
       - run: cargo check --lib --locked --target wasm32-unknown-unknown
       - run: cargo check --lib --locked --target thumbv7em-none-eabihf
 
+  fuzz-targets:
+    name: Fuzz targets compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: rustup toolchain install nightly --profile minimal
+      - run: cargo +nightly check --manifest-path fuzz/Cargo.toml --locked --bins
+
   repository-policy:
     name: Repository policy
     runs-on: ubuntu-latest

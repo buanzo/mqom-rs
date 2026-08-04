@@ -29,6 +29,10 @@ The initial direct dependencies are maintained by their respective projects:
 - `subtle`: BSD-3-Clause
 - `zeroize`: Apache-2.0 OR MIT
 
+Development-only tooling additionally uses `getrandom` (MIT OR Apache-2.0) for
+the benchmark system RNG and `libfuzzer-sys`, licensed under
+`(MIT OR Apache-2.0) AND NCSA`, for fuzzing.
+
 `Cargo.lock` is the authoritative resolved dependency inventory. Continuous
 integration checks dependency licenses and advisories. Transitive dependencies
 retain their own notices and terms.

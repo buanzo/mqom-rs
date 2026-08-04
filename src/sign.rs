@@ -7,7 +7,7 @@ use crate::{
     xof::{Shake128State, shake128},
 };
 use alloc::{vec, vec::Vec};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 const FIRST_COMMITMENT_OFFSET: usize = params::SALT_SIZE;
 const SECOND_COMMITMENT_OFFSET: usize = FIRST_COMMITMENT_OFFSET + params::DIGEST_SIZE;
@@ -30,6 +30,16 @@ const _: () = {
 };
 
 type Alpha = [[Gf256x2; params::ETA]; params::TAU];
+
+struct SecretEquationVectors(Vec<[Gf256x2; params::MQ_N]>);
+
+impl Drop for SecretEquationVectors {
+    fn drop(&mut self) {
+        for vector in &mut self.0 {
+            vector.zeroize();
+        }
+    }
+}
 
 fn parse_extension_vector<const N: usize>(bytes: &[u8]) -> Option<[Gf256x2; N]> {
     if bytes.len() != N * Gf256x2::ENCODED_LEN {
@@ -54,7 +64,7 @@ fn compute_alpha(
     commitment: &blc::SigningCommitment,
     secret: &[Gf16; params::MQ_N],
     master_seed: &[u8; keygen::KEYGEN_SEED_SIZE],
-) -> Option<(Alpha, Alpha)> {
+) -> Option<(Zeroizing<Alpha>, Zeroizing<Alpha>)> {
     let mut batching_stream = vec![0u8; params::ETA * mq::EQUATION_COUNT * Gf256x2::ENCODED_LEN];
     shake128(&[&[0x08], first_commitment], &mut batching_stream);
     let mut batching = [[Gf256x2::ZERO; mq::EQUATION_COUNT]; params::ETA];
@@ -66,30 +76,31 @@ fn compute_alpha(
     }
 
     let equations = expand_equations(master_seed)?;
-    let mut t_one = Vec::with_capacity(mq::EQUATION_COUNT);
+    let mut t_one = SecretEquationVectors(Vec::with_capacity(mq::EQUATION_COUNT));
     for equation in &equations {
         let mut value = equation.multiply_base(secret);
         for (element, linear) in value.iter_mut().zip(equation.linear()) {
             *element += *linear;
         }
-        t_one.push(value);
+        t_one.0.push(value);
     }
 
     let mut alpha_zero = Zeroizing::new([[Gf256x2::ZERO; params::ETA]; params::TAU]);
     let mut alpha_one = Zeroizing::new([[Gf256x2::ZERO; params::ETA]; params::TAU]);
     for execution in 0..params::TAU {
-        let mut z_zero = [Gf256x2::ZERO; mq::EQUATION_COUNT];
-        let mut z_one = [Gf256x2::ZERO; mq::EQUATION_COUNT];
+        let mut z_zero = Zeroizing::new([Gf256x2::ZERO; mq::EQUATION_COUNT]);
+        let mut z_one = Zeroizing::new([Gf256x2::ZERO; mq::EQUATION_COUNT]);
         for equation_index in 0..mq::EQUATION_COUNT {
-            let t_zero =
-                equations[equation_index].multiply_extension(&commitment.x_zero[execution]);
+            let t_zero = Zeroizing::new(
+                equations[equation_index].multiply_extension(&commitment.x_zero[execution]),
+            );
             for ((t_zero_element, x_zero_element), secret_element) in
                 t_zero.iter().zip(&commitment.x_zero[execution]).zip(secret)
             {
                 z_zero[equation_index] += *t_zero_element * *x_zero_element;
                 z_one[equation_index] += *t_zero_element * *secret_element;
             }
-            for (t_one_element, x_zero_element) in t_one[equation_index]
+            for (t_one_element, x_zero_element) in t_one.0[equation_index]
                 .iter()
                 .zip(&commitment.x_zero[execution])
             {
@@ -108,7 +119,7 @@ fn compute_alpha(
             alpha_one[execution][component] = one;
         }
     }
-    Some((*alpha_zero, *alpha_one))
+    Some((alpha_zero, alpha_one))
 }
 
 fn sample_challenge(
@@ -155,7 +166,7 @@ pub(crate) fn sign(
     signature[FIRST_COMMITMENT_OFFSET..SECOND_COMMITMENT_OFFSET].copy_from_slice(&first_commitment);
 
     let mut alpha_one_offset = ALPHA_ONE_OFFSET;
-    for execution in &alpha_one {
+    for execution in alpha_one.iter() {
         for element in execution {
             let encoded = element.to_bytes();
             signature[alpha_one_offset..alpha_one_offset + encoded.len()].copy_from_slice(&encoded);
@@ -168,7 +179,7 @@ pub(crate) fn sign(
 
     let mut second_commitment_state = Shake128State::new();
     second_commitment_state.absorb(&[0x03]);
-    for execution in &alpha_zero {
+    for execution in alpha_zero.iter() {
         for element in execution {
             second_commitment_state.absorb(&element.to_bytes());
         }

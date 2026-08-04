@@ -6,7 +6,7 @@
 
 use crate::params;
 use core::fmt;
-use rand_core::{CryptoRng, TryCryptoRng};
+use rand_core::TryCryptoRng;
 use signature::SignatureEncoding;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -238,10 +238,12 @@ impl SigningKey {
     ///
     /// # Errors
     ///
-    /// Returns an opaque error if the fixed profile cannot be expanded.
-    pub fn generate<R: CryptoRng + ?Sized>(rng: &mut R) -> Result<Self, signature::Error> {
+    /// Returns an opaque error if the randomness source fails or the fixed
+    /// profile cannot be expanded.
+    pub fn generate<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, signature::Error> {
         let mut seed = Zeroizing::new([0u8; crate::keygen::KEYGEN_SEED_SIZE]);
-        rng.fill_bytes(seed.as_mut());
+        rng.try_fill_bytes(seed.as_mut())
+            .map_err(|_| signature::Error::new())?;
         crate::keygen::keypair_from_seed(&seed)
             .map(|(secret_key, _)| Self(secret_key))
             .ok_or_else(signature::Error::new)
@@ -376,6 +378,37 @@ mod tests {
 
     impl TryCryptoRng for TestRng {}
 
+    #[derive(Debug)]
+    struct TestRngError;
+
+    impl fmt::Display for TestRngError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("test RNG failure")
+        }
+    }
+
+    impl core::error::Error for TestRngError {}
+
+    struct FailingRng;
+
+    impl TryRng for FailingRng {
+        type Error = TestRngError;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Err(TestRngError)
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Err(TestRngError)
+        }
+
+        fn try_fill_bytes(&mut self, _destination: &mut [u8]) -> Result<(), Self::Error> {
+            Err(TestRngError)
+        }
+    }
+
+    impl TryCryptoRng for FailingRng {}
+
     fn test_signing_key() -> SigningKey {
         let seed = core::array::from_fn(|index| u8::try_from(index).unwrap());
         let (encoded, _) = crate::keygen::keypair_from_seed(&seed).unwrap();
@@ -431,12 +464,43 @@ mod tests {
     }
 
     #[test]
-    fn generated_keys_sign_and_verify() {
+    fn generated_keys_sign_verify_and_reject_mutations() {
         let mut rng = TestRng(0);
         let key = SigningKey::generate(&mut rng).unwrap();
-        let signature = key.try_sign_with_rng(&mut rng, b"native MQOM").unwrap();
-        key.verifying_key()
-            .verify(b"native MQOM", &signature)
-            .unwrap();
+        let verifying_key = key.verifying_key();
+        let message = b"native MQOM";
+        let signature = key.try_sign_with_rng(&mut rng, message).unwrap();
+        verifying_key.verify(message, &signature).unwrap();
+
+        for position in [0, 16, 48, 80, 272, SIGNATURE_SIZE - 1] {
+            let mut encoded = signature.to_bytes();
+            encoded[position] ^= 1;
+            let mutated = Signature::from_slice(&encoded).unwrap();
+            assert!(verifying_key.verify(message, &mutated).is_err());
+        }
+
+        let mut mutated_message = *message;
+        mutated_message[0] ^= 1;
+        assert!(verifying_key.verify(&mutated_message, &signature).is_err());
+
+        let mut mutated_key = verifying_key.to_bytes();
+        mutated_key[PUBLIC_KEY_SIZE - 1] ^= 1;
+        assert!(
+            VerifyingKey::from_slice(&mutated_key)
+                .unwrap()
+                .verify(message, &signature)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn randomness_failures_are_propagated() {
+        assert!(SigningKey::generate(&mut FailingRng).is_err());
+
+        let key = test_signing_key();
+        assert!(
+            key.try_sign_with_rng(&mut FailingRng, b"native MQOM")
+                .is_err()
+        );
     }
 }

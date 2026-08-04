@@ -57,9 +57,9 @@ encoded sizes explicit:
 
 ```rust,no_run
 use mqom::mqom2_l1_gf16_short_r5::SigningKey;
-use rand_core::CryptoRng;
+use rand_core::TryCryptoRng;
 
-fn round_trip<R: CryptoRng + ?Sized>(rng: &mut R, message: &[u8]) {
+fn round_trip<R: TryCryptoRng + ?Sized>(rng: &mut R, message: &[u8]) {
     let key = SigningKey::generate(rng).unwrap();
     let signature = key.try_sign_with_rng(rng, message).unwrap();
     key.verifying_key().verify(message, &signature).unwrap();
@@ -68,10 +68,11 @@ fn round_trip<R: CryptoRng + ?Sized>(rng: &mut R, message: &[u8]) {
 
 ## Project status and participation
 
-See [ROADMAP.md](ROADMAP.md) for public milestones. Issues, research notes,
-test reports, and design discussion are welcome. During the initial
-steward-only implementation phase, outside code is reviewed but not merged;
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+See [ROADMAP.md](ROADMAP.md) for public milestones and
+[HARDENING.md](HARDENING.md) for the current security-engineering evidence and
+its limits. Issues, research notes, test reports, and design discussion are
+welcome. During the initial steward-only implementation phase, outside code is
+reviewed but not merged; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

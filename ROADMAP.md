@@ -30,8 +30,10 @@ stewardship material.
 ## M3: hardening and 0.1.0 — in progress
 
 - Add parser/verifier fuzzing, negative tests, memory and timing review, and
-  representative `no_std` target checks.
-- Document the stable high-level API and publish the first crates.io release.
+  representative `no_std` target checks. **Initial hardening complete; ongoing.**
+- Document the stable high-level API. **Complete.**
+- Publish the first crates.io release. **Pending independent review and explicit
+  steward approval.**
 - Continue to label the crate experimental and unaudited.
 
 Additional parameter sets and upstream-version migrations are out of scope

@@ -9,6 +9,7 @@ license = "AGPL-3.0-only"
 keywords = ["cryptography", "post-quantum", "signature", "mqom"]
 categories = ["cryptography", "no-std"]
 publish = false
+exclude = ["fuzz/**"]
 
 [workspace]
 members = ["xtask"]
@@ -21,6 +22,13 @@ sha3 = { version = "0.10.8", default-features = false }
 signature = { version = "3.0.0", default-features = false, features = ["rand_core"] }
 subtle = { version = "2.6.1", default-features = false }
 zeroize = { version = "1.9.0", default-features = false }
+
+[dev-dependencies]
+getrandom = { version = "0.4.3", features = ["sys_rng"] }
+
+[[bench]]
+name = "profile"
+harness = false
 
 [lints.rust]
 unsafe_code = "forbid"
