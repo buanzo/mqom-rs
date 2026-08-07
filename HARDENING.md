@@ -19,12 +19,16 @@ neither is part of the repository or crate package.
 
 ## Fuzzing surfaces
 
-The separate, package-excluded `fuzz/` project contains two `cargo-fuzz`
+The separate, package-excluded `fuzz/` project contains three `cargo-fuzz`
 targets:
 
 - `public_api` exercises all public parsers and signing-key consistency checks.
 - `verify` fixes the public-key and signature boundaries, then passes the
   remaining bytes as the message to the complete verifier.
+- `structured_verify` creates one deterministic valid fixture per process,
+  verifies the baseline, and exposes every public-key, signature, and message
+  byte to selectable single-bit mutations. Acceptance of a mutation or a
+  verifier panic becomes a reproducible fuzz failure.
 
 Build or run them with a current nightly toolchain:
 
@@ -32,9 +36,10 @@ Build or run them with a current nightly toolchain:
 cargo +nightly fuzz build
 cargo +nightly fuzz run public_api
 cargo +nightly fuzz run verify
+cargo +nightly fuzz run structured_verify
 ```
 
-CI compiles both targets and audits their separate lockfile. A compiled target
+CI compiles all targets and audits their separate lockfile. A compiled target
 and a short local smoke campaign are regression evidence, not a substitute for
 a sustained, independently reviewed fuzzing campaign.
 
@@ -87,6 +92,12 @@ These results are point-in-time engineering evidence, not an independent audit:
 - Two 60-second libFuzzer campaigns completed without a crash: `public_api`
   executed 10,202 inputs and `verify` executed 29,313 inputs, including
   valid-length verifier inputs. This is a smoke campaign, not saturation.
+- After adding `structured_verify` on 2026-08-06, a 61-second campaign completed
+  4,979 deep verification units without a crash or accepted single-bit
+  mutation. It reached 806 coverage counters and 1,047 libFuzzer features at
+  81 executions per second; the four curated seeds retain baseline, signature,
+  public-key, and message paths. This remains a smoke campaign, not saturation
+  or side-channel evidence.
 - LLVM source coverage was 72.37% by line across the workspace. Core protocol
   modules ranged from 89.00% to 100.00% except for public API trait and glue
   code at 70.31%; the separate `xtask` command was not exercised by that run.
