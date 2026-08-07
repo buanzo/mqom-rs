@@ -30,6 +30,10 @@ targets:
   byte to selectable single-bit mutations. Acceptance of a mutation or a
   verifier panic becomes a reproducible fuzz failure.
 
+Its committed corpus combines four named invariant seeds with minimized inputs
+retained from an extended campaign. This preserves both understandable starting
+points and additional libFuzzer-discovered coverage across future runs.
+
 Build or run them with a current nightly toolchain:
 
 ```console
@@ -98,6 +102,12 @@ These results are point-in-time engineering evidence, not an independent audit:
   81 executions per second; the four curated seeds retain baseline, signature,
   public-key, and message paths. This remains a smoke campaign, not saturation
   or side-channel evidence.
+- After merging that target, a 601-second campaign completed 46,311 units without
+  a crash or accepted mutation. It reached 806 coverage counters and 1,185
+  libFuzzer features at 77 executions per second, with 400 MiB peak RSS. An
+  incremental corpus merge retained four additional inputs that contributed six
+  coverage edges and 197 features beyond the four named seeds. This extended run
+  remains engineering evidence, not proof of saturation or side-channel safety.
 - LLVM source coverage was 72.37% by line across the workspace. Core protocol
   modules ranged from 89.00% to 100.00% except for public API trait and glue
   code at 70.31%; the separate `xtask` command was not exercised by that run.
